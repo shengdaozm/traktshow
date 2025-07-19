@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        arch: [amd64]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22' # Use a specific Go version
+
+      - name: Go Mod Tidy
+        run: go mod tidy
+
+      - name: Run Tests
+        run: go test ./...
+
+      - name: Build
+        run: |
+          output_filename="traktshow"
+          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            output_filename="traktshow.exe"
+          fi
+          mkdir -p dist/${{ matrix.os }}-${{ matrix.arch }}
+          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o dist/${{ matrix.os }}-${{ matrix.arch }}/${output_filename} .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: traktshow-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/${{ matrix.os }}-${{ matrix.arch }}/
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: build # Ensure build job completes successfully
+    if: github.ref == 'refs/heads/main' # Only create release if pushed to main
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get current date for version
+        id: date
+        run: echo "VERSION=v$(date +'%Y.%m.%d-%H%M%S')" >> $GITHUB_ENV
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.VERSION }}
+          release_name: Release ${{ env.VERSION }}
+          draft: false
+          prerelease: false
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded_artifacts
+
+      - name: Upload Release Assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPLOAD_URL: ${{ steps.create_release.outputs.upload_url }}
+        run: |
+          find downloaded_artifacts -type f -name "traktshow*" -print0 | while IFS= read -r -d $'\0' file; do
+            dir_name=$(dirname "$file")
+            os_arch_part=$(basename "$dir_name")
+            os_arch_part=${os_arch_part#traktshow-}
+            os_part=$(echo "$os_arch_part" | cut -d'-' -f1)
+            arch_part=$(echo "$os_arch_part" | cut -d'-' -f3)
+
+            case "$os_part" in
+              ubuntu) os_name="linux" ;;
+              windows) os_name="windows" ;;
+              macos) os_name="darwin" ;;
+              *) os_name="$os_part" ;;
+            esac
+
+            asset_name="traktshow-${os_name}-${arch_part}"
+            if [[ "$file" == *.exe ]]; then
+              asset_name="${asset_name}.exe"
+            fi
+
+            echo "Uploading $file as $asset_name"
+            curl -X POST -H "Authorization: token $GITHUB_TOKEN" \
+                 -H "Content-Type: application/octet-stream" \
+                 --data-binary "@$file" \
+                 "$UPLOAD_URL?name=$asset_name"
+          done
