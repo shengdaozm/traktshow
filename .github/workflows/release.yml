@@ -56,6 +56,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: build # Ensure build job completes successfully
     if: github.ref == 'refs/heads/main' # Only create release if pushed to main
+    permissions:
+      contents: write # Grant write permission to GITHUB_TOKEN for creating releases
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
