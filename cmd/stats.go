@@ -24,9 +24,12 @@ var statsCmd = &cobra.Command{
 			return
 		}
 
+		fmt.Println("--- Your Trakt.tv Statistics ---")
+		fmt.Println("-------------------------------------")
 		fmt.Printf("Movies watched: %d\n", stats.Movies.Watched)
 		fmt.Printf("Shows watched: %d\n", stats.Shows.Watched)
 		fmt.Printf("Episodes watched: %d\n", stats.Episodes.Watched)
+		fmt.Println("-------------------------------------")
 	},
 }
 

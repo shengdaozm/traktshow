@@ -24,9 +24,12 @@ var progressCmd = &cobra.Command{
 			return
 		}
 
+		fmt.Println("\n--- Your Trakt.tv Watch Progress ---")
+		fmt.Println("-------------------------------------")
 		for _, item := range progress {
-			fmt.Printf("- %s - %d/%d episodes watched\n", item.Show.Title, item.Plays, item.Show.AiredEpisodes)
+			fmt.Printf("%-30s Watched: %d/%d episodes\n", item.Show.Title, item.Plays, item.Show.AiredEpisodes)
 		}
+		fmt.Println("-------------------------------------")
 	},
 }
 
