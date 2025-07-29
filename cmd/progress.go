@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/zm/traktshow/config"
 	"github.com/zm/traktshow/trakt"
 )
 
@@ -12,7 +13,13 @@ var progressCmd = &cobra.Command{
 	Short: "Fetch your watch progress",
 	Long:  `Fetches and displays your watch progress from Trakt.tv.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		client, err := trakt.NewClient()
+		cfg, err := config.LoadConfig()
+		if err != nil {
+			fmt.Println("Error loading config:", err)
+			return
+		}
+
+		client, err := trakt.NewClient(cfg)
 		if err != nil {
 			fmt.Println("Error creating Trakt client:", err)
 			return

@@ -4,64 +4,39 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
+
+	"github.com/zm/traktshow/config"
 )
 
 const (
-	apiURL        = "https://api.trakt.tv"
-	tokenFilename = "token.json"
-	credsFilename = "credentials.json"
+	apiURL       = "https://api.trakt.tv"
+	clientID     = "275ab080baf9ab6044ddf8c5cb29463de65329b958df554631cf54f138125b6e"
+	clientSecret = "d50ca71b9e4ad2651eb766e481299c156db771d4e873feb78742de29ca40e30d"
 )
 
 // Client struct holds the http client, credentials and token
 type Client struct {
 	client *http.Client
-	creds  *Credentials
-	token  *Token
-}
-
-// Credentials stores the client id and secret
-type Credentials struct {
-	ClientID     string `json:"client_id"`
-	ClientSecret string `json:"client_secret"`
-}
-
-// Token stores the oauth tokens
-type Token struct {
-	AccessToken  string `json:"access_token"`
-	TokenType    string `json:"token_type"`
-	ExpiresIn    int    `json:"expires_in"`
-	RefreshToken string `json:"refresh_token"`
-	Scope        string `json:"scope"`
-	CreatedAt    int64  `json:"created_at"`
+	config *config.Config
 }
 
 // NewClient creates a new Trakt client
-func NewClient() (*Client, error) {
-	creds, err := loadCredentials()
-	if err != nil {
-		return nil, err
-	}
-
-	token, _ := loadToken()
-
+func NewClient(cfg *config.Config) (*Client, error) {
 	return &Client{
-		client: &http.Client{},
-		creds:  creds,
-		token:  token,
-	}, nil
+			client: &http.Client{},
+			config: cfg,
+		},
+		nil
 }
 
 // Authenticate handles the device authentication flow
-func (c *Client) Authenticate() error {
+func (c *Client) Authenticate() (*config.Token, error) {
 	// Step 1: Get device code
 	deviceCode, err := c.getDeviceCode()
 	if err != nil {
-		return fmt.Errorf("could not get device code: %w", err)
+		return nil, fmt.Errorf("could not get device code: %w", err)
 	}
 
 	fmt.Printf("Go to %s and enter the code: %s\n", deviceCode.VerificationURL, deviceCode.UserCode)
@@ -81,10 +56,9 @@ func (c *Client) Authenticate() error {
 				// continue polling
 				continue
 			}
-			c.token = token
-			return c.saveToken()
+			return token, nil
 		case <-time.After(time.Until(expiresAt)):
-			return fmt.Errorf("authentication timed out")
+			return nil, fmt.Errorf("authentication timed out")
 		}
 	}
 }
@@ -106,12 +80,10 @@ func (c *Client) newRequest(method, url string, body interface{}) (*http.Request
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("trakt-api-version", "2")
+	req.Header.Set("trakt-api-key", clientID)
 
-	if c.token != nil {
-		req.Header.Set("Authorization", "Bearer "+c.token.AccessToken)
-		req.Header.Set("trakt-api-key", c.creds.ClientID)
-	} else {
-		req.Header.Set("trakt-api-key", c.creds.ClientID)
+	if c.config.Token != nil {
+		req.Header.Set("Authorization", "Bearer "+c.config.Token.AccessToken)
 	}
 
 	return req, nil
@@ -134,9 +106,9 @@ func (c *Client) do(req *http.Request, v interface{}) error {
 	return nil
 }
 
-// GetHistory fetches user history
-func (c *Client) GetHistory(user string, limit int) ([]HistoryItem, error) {
-	url := fmt.Sprintf("%s/users/%s/history?limit=%d", apiURL, user, limit)
+// GetHistory fetches user history for a specific page
+func (c *Client) GetHistory(user string, limit, page int) ([]HistoryItem, error) {
+	url := fmt.Sprintf("%s/users/%s/history?limit=%d&page=%d", apiURL, user, limit, page)
 	req, err := c.newRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -145,6 +117,31 @@ func (c *Client) GetHistory(user string, limit int) ([]HistoryItem, error) {
 	var history []HistoryItem
 	err = c.do(req, &history)
 	return history, err
+}
+
+// GetAllHistory fetches all user history using pagination
+func (c *Client) GetAllHistory(user string) ([]HistoryItem, error) {
+	var allHistory []HistoryItem
+	page := 1
+	limit := 100 // Max limit per page
+
+	for {
+		fmt.Printf("Fetching page %d...\n", page)
+		history, err := c.GetHistory(user, limit, page)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(history) == 0 {
+			// No more items, break the loop
+			break
+		}
+
+		allHistory = append(allHistory, history...)
+		page++
+	}
+
+	return allHistory, nil
 }
 
 // GetWatched fetches user watched progress
@@ -173,53 +170,6 @@ func (c *Client) GetStats(user string) (Stats, error) {
 	return stats, err
 }
 
-// --- Helper Functions ---
-
-func getConfigPath(filename string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".config", "trakt", filename)
-}
-
-func loadCredentials() (*Credentials, error) {
-	path := getConfigPath(credsFilename)
-	data, err := ioutil.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("credentials not found at %s, please run 'traktshow config'", path)
-	}
-
-	var creds Credentials
-	if err := json.Unmarshal(data, &creds); err != nil {
-		return nil, fmt.Errorf("could not parse credentials: %w", err)
-	}
-	return &creds, nil
-}
-
-func loadToken() (*Token, error) {
-	path := getConfigPath(tokenFilename)
-	data, err := ioutil.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	var token Token
-	if err := json.Unmarshal(data, &token); err != nil {
-		return nil, err
-	}
-	return &token, nil
-}
-
-func (c *Client) saveToken() error {
-	path := getConfigPath(tokenFilename)
-	data, err := json.MarshalIndent(c.token, "", "  ")
-	if err != nil {
-		return err
-	}
-	return ioutil.WriteFile(path, data, 0600)
-}
-
 type DeviceCodeResponse struct {
 	DeviceCode      string `json:"device_code"`
 	UserCode        string `json:"user_code"`
@@ -230,7 +180,7 @@ type DeviceCodeResponse struct {
 
 func (c *Client) getDeviceCode() (*DeviceCodeResponse, error) {
 	url := fmt.Sprintf("%s/oauth/device/code", apiURL)
-	body := map[string]string{"client_id": c.creds.ClientID}
+	body := map[string]string{"client_id": clientID}
 	req, err := c.newRequest("POST", url, body)
 	if err != nil {
 		return nil, err
@@ -241,19 +191,19 @@ func (c *Client) getDeviceCode() (*DeviceCodeResponse, error) {
 	return &deviceCode, err
 }
 
-func (c *Client) pollForToken(deviceCode string) (*Token, error) {
+func (c *Client) pollForToken(deviceCode string) (*config.Token, error) {
 	url := fmt.Sprintf("%s/oauth/device/token", apiURL)
 	body := map[string]string{
 		"code":          deviceCode,
-		"client_id":     c.creds.ClientID,
-		"client_secret": c.creds.ClientSecret,
+		"client_id":     clientID,
+		"client_secret": clientSecret,
 	}
 	req, err := c.newRequest("POST", url, body)
 	if err != nil {
 		return nil, err
 	}
 
-	var token Token
+	var token config.Token
 	if err := c.do(req, &token); err != nil {
 		return nil, err
 	}
@@ -265,7 +215,7 @@ func (c *Client) pollForToken(deviceCode string) (*Token, error) {
 
 type HistoryItem struct {
 	WatchedAt time.Time `json:"watched_at"`
-	Show struct {
+	Show      struct {
 		Title string `json:"title"`
 	} `json:"show"`
 	Episode struct {
@@ -294,3 +244,4 @@ type Stats struct {
 		Watched int `json:"watched"`
 	} `json:"episodes"`
 }
+

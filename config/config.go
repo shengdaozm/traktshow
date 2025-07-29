@@ -4,11 +4,30 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"time"
 )
+
+// Token stores the oauth tokens
+type Token struct {
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+	RefreshToken string `json:"refresh_token"`
+	Scope        string `json:"scope"`
+	CreatedAt    int64  `json:"created_at"`
+}
+
+// IsExpired checks if the token is expired
+func (t *Token) IsExpired() bool {
+	if t == nil {
+		return true
+	}
+	return time.Now().Unix() > t.CreatedAt+int64(t.ExpiresIn)
+}
 
 // Config 存储应用程序的配置
 type Config struct {
-	APIKey string `json:"api_key"`
+	Token *Token `json:"token"`
 }
 
 // 配置文件路径变量（导出供测试使用）
