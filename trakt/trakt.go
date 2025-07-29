@@ -154,6 +154,22 @@ func (c *Client) GetWatched(user string) ([]WatchedItem, error) {
 
 	var watched []WatchedItem
 	err = c.do(req, &watched)
+	if err != nil {
+		return nil, err
+	}
+
+	// For each watched item, fetch full show details to get accurate aired_episodes
+	for i, item := range watched {
+		if item.Show.IDs.Trakt != 0 {
+			showDetails, err := c.GetShowDetails(item.Show.IDs.Trakt)
+			if err != nil {
+				fmt.Printf("Warning: Could not fetch details for show %s (Trakt ID: %d): %v\n", item.Show.Title, item.Show.IDs.Trakt, err)
+				continue
+			}
+			watched[i].Show.AiredEpisodes = showDetails.AiredEpisodes
+		}
+	}
+
 	return watched, err
 }
 
@@ -229,6 +245,9 @@ type WatchedItem struct {
 	Plays int `json:"plays"`
 	Show  struct {
 		Title         string `json:"title"`
+		IDs           struct {
+			Trakt int `json:"trakt"`
+		} `json:"ids"`
 		AiredEpisodes int    `json:"aired_episodes"`
 	} `json:"show"`
 }
@@ -243,5 +262,29 @@ type Stats struct {
 	Episodes struct {
 		Watched int `json:"watched"`
 	} `json:"episodes"`
+}
+
+// ShowDetails represents the detailed information of a show from Trakt API
+type ShowDetails struct {
+	IDs struct {
+		Trakt int `json:"trakt"`
+	} `json:"ids"`
+	AiredEpisodes int `json:"aired_episodes"`
+}
+
+// GetShowDetails fetches detailed information for a show by its Trakt ID
+func (c *Client) GetShowDetails(traktID int) (*ShowDetails, error) {
+	url := fmt.Sprintf("%s/shows/%d?extended=full", apiURL, traktID)
+	req, err := c.newRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var showDetails ShowDetails
+	err = c.do(req, &showDetails)
+	if err != nil {
+		return nil, err
+	}
+	return &showDetails, nil
 }
 

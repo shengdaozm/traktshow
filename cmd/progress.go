@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
+	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 	"github.com/zm/traktshow/config"
 	"github.com/zm/traktshow/trakt"
@@ -11,7 +13,7 @@ import (
 var progressCmd = &cobra.Command{
 	Use:   "progress",
 	Short: "Fetch your watch progress",
-	Long:  `Fetches and displays your watch progress from Trakt.tv.`,
+	Long:  `Fetches and displays your watch progress for shows from Trakt.tv. Shows that have been fully watched are not displayed.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		cfg, err := config.LoadConfig()
 		if err != nil {
@@ -32,9 +34,21 @@ var progressCmd = &cobra.Command{
 		}
 
 		fmt.Println("\n--- Your Trakt.tv Watch Progress ---")
-		fmt.Println("-------------------------------------")
 		for _, item := range progress {
-			fmt.Printf("%-30s Watched: %d/%d episodes\n", item.Show.Title, item.Plays, item.Show.AiredEpisodes)
+			if item.Plays < item.Show.AiredEpisodes {
+				description := fmt.Sprintf("%-40s", item.Show.Title)
+				bar := progressbar.NewOptions(item.Show.AiredEpisodes,
+					progressbar.OptionSetDescription(description),
+					progressbar.OptionSetWriter(os.Stderr),
+					progressbar.OptionShowCount(),
+					progressbar.OptionSetWidth(30),
+					progressbar.OptionOnCompletion(func() {
+						fmt.Fprint(os.Stderr, "\n")
+					}),
+				)
+				bar.Set(item.Plays)
+				bar.Finish() // Ensure newline after each bar
+			}
 		}
 		fmt.Println("-------------------------------------")
 	},
