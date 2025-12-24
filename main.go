@@ -77,7 +77,7 @@ func fetchAndPrintData() {
 	}
 	utils.PrintUserInfo(userInfo)
 
-	// 获取最近10条观看记录
+	// 获取最近100条观看记录
 	watchHistory, err := trakt.GetWatchHistory(accessToken, 100)
 	if err != nil {
 		log.Fatalf("❌ 获取观看记录失败：%v", err)
